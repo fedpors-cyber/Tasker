@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Список задач с подзадачами</title>
+  <style>
+    :root { --bg:#0b1220; --card:#111a2e; --text:#e7eefc; --muted:#a7b4d3; --line:#223055; --ok:#2dd4bf; --danger:#fb7185; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; background:linear-gradient(180deg,#070b14,#0b1220); color:var(--text); }
+    .wrap { max-width: 980px; margin: 32px auto; padding: 0 16px; }
+    header { display:flex; gap:12px; align-items:baseline; justify-content:space-between; margin-bottom: 16px; }
+    h1 { font-size: 20px; margin:0; }
+    .muted { color: var(--muted); font-size: 13px; }
+
+    .card { background: rgba(17,26,46,0.85); border: 1px solid rgba(34,48,85,0.8); border-radius: 14px; padding: 14px; }
+    .row { display:flex; gap:10px; flex-wrap: wrap; }
+    input[type="text"] { flex: 1 1 320px; padding:10px 12px; border-radius: 12px; border:1px solid var(--line); background:#0a1020; color:var(--text); outline:none; }
+    button { padding:10px 12px; border-radius: 12px; border:1px solid var(--line); background:#0a1020; color:var(--text); cursor:pointer; }
+    button:hover { border-color:#35508f; }
+    button.danger { border-color: rgba(251,113,133,0.35); }
+    button.danger:hover { border-color: rgba(251,113,133,0.85); }
+    button.ok { border-color: rgba(45,212,191,0.35); }
+    button.ok:hover { border-color: rgba(45,212,191,0.85); }
+
+    ul { list-style: none; padding-left: 0; margin: 12px 0 0; }
+    li.task { border:1px solid var(--line); border-radius: 14px; padding: 10px; margin: 10px 0; background: rgba(10,16,32,0.65); }
+    .task-head { display:flex; gap:10px; align-items:center; justify-content:space-between; }
+    .left { display:flex; gap:10px; align-items:center; min-width:0; }
+    .title { white-space: nowrap; overflow:hidden; text-overflow: ellipsis; }
+    .done .title { text-decoration: line-through; color: var(--muted); }
+    .actions { display:flex; gap:8px; flex-wrap: wrap; justify-content: flex-end; }
+
+    .sub { margin-top: 10px; padding-top: 10px; border-top:1px dashed rgba(34,48,85,0.8); }
+    .sub .row { margin-bottom: 8px; }
+    .sub ul { margin-top: 8px; padding-left: 18px; }
+    .sub li { border-left: 2px solid rgba(34,48,85,0.8); padding-left: 10px; margin: 8px 0; }
+    .small { font-size: 12px; color: var(--muted); }
+    label { user-select:none; }
+    input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--ok); }
+    .footer { margin-top: 12px; display:flex; gap:10px; flex-wrap: wrap; align-items:center; justify-content:space-between; }
+    .kbd { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono"; font-size: 12px; padding:2px 6px; border:1px solid var(--line); border-radius: 8px; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Список задач с подзадачами</h1>
+      <div class="muted">Сохраняется в localStorage</div>
+    </header>
+
+    <div class="card">
+      <div class="row">
+        <input id="newTaskTitle" type="text" placeholder="Новая задача (например: Подготовить отчёт)" />
+        <button id="addTaskBtn" class="ok">Добавить задачу</button>
+        <button id="clearBtn" class="danger" title="Удалит все задачи">Очистить всё</button>
+      </div>
+
+      <div class="footer">
+        <div class="small">Подсказка: Enter — добавить задачу; Ctrl/⌘+Enter — добавить подзадачу в выбранной форме.</div>
+        <div class="small"><span class="kbd">localStorage</span> ключ: <span class="kbd">nested_todos_v1</span></div>
+      </div>
+
+      <ul id="tasks"></ul>
+    </div>
+  </div>
+
+<script>
+(() => {
+  const STORAGE_KEY = "nested_todos_v1";
+
+  /** @type {{id:string,title:string,done:boolean,subtasks:{id:string,title:string,done:boolean}[]}[]} */
+  let state = load() ?? [];
+
+  const $tasks = document.getElementById("tasks");
+  const $newTaskTitle = document.getElementById("newTaskTitle");
+  const $addTaskBtn = document.getElementById("addTaskBtn");
+  const $clearBtn = document.getElementById("clearBtn");
+
+  function uid() {
+    return (crypto?.randomUUID?.() ?? ("id_" + Math.random().toString(16).slice(2) + Date.now().toString(16)));
+  }
+
+  function load() {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    try { return JSON.parse(raw); } catch { return null; }
+  }
+
+  function save() {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  }
+
+  function escapeHtml(s) {
+    return s.replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+  }
+
+  function render() {
+    $tasks.innerHTML = state.map(task => {
+      const doneClass = task.done ? "done" : "";
+      const subtasksHtml = task.subtasks.map(st => `
+        <li class="${st.done ? "done" : ""}" data-subtask-id="${escapeHtml(st.id)}">
+          <div class="task-head">
+            <div class="left">
+              <label>
+                <input type="checkbox" data-action="toggle-subtask" ${st.done ? "checked" : ""} />
+              </label>
+              <div class="title" title="${escapeHtml(st.title)}">${escapeHtml(st.title)}</div>
+            </div>
+            <div class="actions">
+              <button data-action="edit-subtask">Переименовать</button>
+              <button data-action="delete-subtask" class="danger">Удалить</button>
+            </div>
+          </div>
+        </li>
+      `).join("");
+
+      return `
+        <li class="task ${doneClass}" data-task-id="${escapeHtml(task.id)}">
+          <div class="task-head">
+            <div class="left">
+              <label>
+                <input type="checkbox" data-action="toggle-task" ${task.done ? "checked" : ""} />
+              </label>
+              <div class="title" title="${escapeHtml(task.title)}">${escapeHtml(task.title)}</div>
+            </div>
+            <div class="actions">
+              <button data-action="add-subtask" class="ok">+ Подзадача</button>
+              <button data-action="edit-task">Переименовать</button>
+              <button data-action="delete-task" class="danger">Удалить</button>
+            </div>
+          </div>
+
+          <div class="sub">
+            <div class="row">
+              <input type="text" data-role="subtask-input" placeholder="Новая подзадача (например: Собрать данные)" />
+              <button data-action="confirm-add-subtask" class="ok">Добавить</button>
+            </div>
+            <ul>${subtasksHtml}</ul>
+            <div class="small">Подзадач: ${task.subtasks.length}</div>
+          </div>
+        </li>
+      `;
+    }).join("");
+  }
+
+  function addTask(title) {
+    const t = title.trim();
+    if (!t) return;
+    state.unshift({ id: uid(), title: t, done: false, subtasks: [] });
+    save();
+    render();
+  }
+
+  function addSubtask(taskId, title) {
+    const t = title.trim();
+    if (!t) return;
+    const task = state.find(x => x.id === taskId);
+    if (!task) return;
+    task.subtasks.push({ id: uid(), title: t, done: false });
+    save();
+    render();
+  }
+
+  function toggleTask(taskId) {
+    const task = state.find(x => x.id === taskId);
+    if (!task) return;
+    task.done = !task.done;
+    save();
+    render();
+  }
+
+  function toggleSubtask(taskId, subtaskId) {
+    const task = state.find(x => x.id === taskId);
+    if (!task) return;
+    const st = task.subtasks.find(x => x.id === subtaskId);
+    if (!st) return;
+    st.done = !st.done;
+    save();
+    render();
+  }
+
+  function deleteTask(taskId) {
+    state = state.filter(x => x.id !== taskId);
+    save();
+    render();
+  }
+
+  function deleteSubtask(taskId, subtaskId) {
+    const task = state.find(x => x.id === taskId);
+    if (!task) return;
+    task.subtasks = task.subtasks.filter(x => x.id !== subtaskId);
+    save();
+    render();
+  }
+
+  function renameTask(taskId) {
+    const task = state.find(x => x.id === taskId);
+    if (!task) return;
+    const next = prompt("Новое название задачи:", task.title);
+    if (next === null) return;
+    const t = next.trim();
+    if (!t) return;
+    task.title = t;
+    save();
+    render();
+  }
+
+  function renameSubtask(taskId, subtaskId) {
+    const task = state.find(x => x.id === taskId);
+    if (!task) return;
+    const st = task.subtasks.find(x => x.id === subtaskId);
+    if (!st) return;
+    const next = prompt("Новое название подзадачи:", st.title);
+    if (next === null) return;
+    const t = next.trim();
+    if (!t) return;
+    st.title = t;
+    save();
+    render();
+  }
+
+  // UI события
+  $addTaskBtn.addEventListener("click", () => addTask($newTaskTitle.value));
+  $newTaskTitle.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      addTask($newTaskTitle.value);
+      $newTaskTitle.value = "";
+    }
+  });
+
+  $clearBtn.addEventListener("click", () => {
+    if (!confirm("Точно удалить все задачи?")) return;
+    state = [];
+    save();
+    render();
+  });
+
+  // Делегирование кликов внутри списка
+  $tasks.addEventListener("click", (e) => {
+    const btn = e.target.closest("button, input[type=checkbox]");
+    if (!btn) return;
+
+    const $task = e.target.closest("[data-task-id]");
+    if (!$task) return;
+    const taskId = $task.getAttribute("data-task-id");
+
+    const $sub = e.target.closest("[data-subtask-id]");
+    const subtaskId = $sub?.getAttribute("data-subtask-id") ?? null;
+
+    const action = btn.getAttribute("data-action");
+
+    if (action === "toggle-task") return toggleTask(taskId);
+    if (action === "delete-task") return deleteTask(taskId);
+    if (action === "edit-task") return renameTask(taskId);
+
+    if (action === "add-subtask") {
+      const input = $task.querySelector('[data-role="subtask-input"]');
+      input?.focus();
+      return;
+    }
+
+    if (action === "confirm-add-subtask") {
+      const input = $task.querySelector('[data-role="subtask-input"]');
+      if (!input) return;
+      addSubtask(taskId, input.value);
+      input.value = "";
+      input.focus();
+      return;
+    }
+
+    if (action === "toggle-subtask" && subtaskId) return toggleSubtask(taskId, subtaskId);
+    if (action === "delete-subtask" && subtaskId) return deleteSubtask(taskId, subtaskId);
+    if (action === "edit-subtask" && subtaskId) return renameSubtask(taskId, subtaskId);
+  });
+
+  // Ctrl/⌘+Enter — добавить подзадачу из активного инпута подзадач
+  $tasks.addEventListener("keydown", (e) => {
+    const input = e.target.closest('input[data-role="subtask-input"]');
+    if (!input) return;
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+      const $task = e.target.closest("[data-task-id]");
+      if (!$task) return;
+      const taskId = $task.getAttribute("data-task-id");
+      addSubtask(taskId, input.value);
+      input.value = "";
+    }
+  });
+
+  // первичный рендер
+  render();
+})();
+</script>
+</body>
+</html>
